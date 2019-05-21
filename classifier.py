@@ -17,7 +17,7 @@ classes_map = { "Asyok"     : [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 "Unknown"   : [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]}
 
 # Class for training data loader
-# trying to implement logic for batch size = 10
+# trying to implement logic for batch size = 10 (deterministic()
 class FeatureVectors(data.Dataset):
     def __init__(self, filename):
         self.json_data = None
@@ -28,46 +28,36 @@ class FeatureVectors(data.Dataset):
         self.labels = []
 
         fv_classes = self.json_data["labels"]
-        fv_classes.remove("Unknown")
-
-        #it is expected that each class has the same amount of feature vectors besides Unknown.
-        size = len(self.json_data[fv_classes[0]])
-        uknown_size = len(self.json_data["Unknown"])
-
-        if uknown_size % size != 0:
-            raise RuntimeError("Size of feature vectors array for 'Unknown' class is not dividable by size of other classes arrays!")
-
-        unknown_in_one_batch = int(uknown_size / size)
-
-        for i in range(0, size):
-            for fv_class in fv_classes:
-                feature_vector = self.json_data[fv_class][i]
-
-                self.feature_vectors.append([ float(n) for n in feature_vector.split(', ') ])
-                self.labels.append(fv_class)
-
-            for j in range(0, unknown_in_one_batch):
-                feature_vector = self.json_data["Unknown"][unknown_in_one_batch * i + j]
-
-                self.feature_vectors.append([ float(n) for n in feature_vector.split(', ') ])
-                self.labels.append("Unknown")
+        for fv_class in fv_classes:
+            feature_vectors = self.json_data[fv_class]
+            self.feature_vectors.extend([ [float(n) for n in v.split(', ') ] for v in feature_vectors])
+            self.labels.extend([fv_class] * len(feature_vectors))
 
         self.size = len(self.feature_vectors)
 
-        #p = numpy.random.permutation(self.size)
-        #self.feature_vectors = numpy.array(self.feature_vectors)[p].tolist()
-        #self.labels = numpy.array(self.labels)[p].tolist()
+        p = numpy.random.permutation(self.size)
+        self.feature_vectors = numpy.array(self.feature_vectors)[p].tolist()
+        self.labels = numpy.array(self.labels)[p].tolist()
+        pass
         
-    
+    # to shuffle after epoch and get batch size = 4 (not 1 to make gradients distribution more better)
+
     def __len__(self):   # Length of the dataset.
         return self.size
     
     def __getitem__(self, index):   # Function that returns one point and one label.
         return torch.Tensor(self.feature_vectors[index]), torch.Tensor(classes_map[self.labels[index]])
 
+    def shuffle(self):
+        p = numpy.random.permutation(self.size)
+        self.feature_vectors = numpy.array(self.feature_vectors)[p].tolist()
+        self.labels = numpy.array(self.labels)[p].tolist()
+        pass
+
 # Training data loader
 
-batch_size = 10 # here output will be formed from 10 vecs
+batch_size = 4 # here output will be formed from 1 vec
+# old logic:
 # batch_size is set to 10 as we have 6 classes: and form vector using 1 element from each of 5 classes and 5 elements of the latest.
 # it is used because of sizes mismatch
 
@@ -92,7 +82,18 @@ criterion = torch.nn.MSELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.1) #step in gradient descent = [10e-3, 10e-1]
 
 # set epochs
-epochs = 1500
+epochs = 2000
+ 
+#after every epoch run validation and check that accuracy do not do slown
+#may be network are super learned on determenistic distributuion
+#add regularization, drop-out for hidden layers (input? output?), l2dk
+#stepdk for learning rate
+#may insert batchnorm instead of drop-out(as they are badly work together)
+
+#may be try Adam instead of SGD (as it is simpler)
+
+#May be Egor is right with method of training about my concern about batch and class? - yes
+#But my idea has sense
 
 # training routine
 for epoch in range(epochs):
@@ -118,5 +119,6 @@ for epoch in range(epochs):
         # update the parameters
         optimizer.step()
 
+    train_data.shuffle()
 
 torch.save(model.state_dict(), 'classifier.pt')
